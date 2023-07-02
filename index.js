@@ -13,6 +13,7 @@ class Fastcache {
 	mappedCache = {};
 	databases = {};
 	collections = {};
+	backgroundUpdate = [];
 	timer = undefined;
 	seconds = 10;
 	/**
@@ -39,6 +40,32 @@ class Fastcache {
 	}
 	
 	/**
+	 * @param {string} key to remove updates from
+	 * */
+	removeBackgroundUpdate(key) {
+		this.backgroundUpdate = this.backgroundUpdate.filter(x => x.key !== key);
+	}
+	
+	runBackgroundUpdates() {
+		const updateable = this.backgroundUpdate;
+		const now = performance.now();
+		
+		for (const config of updateable) {
+			const {key, ttl, reload, queryFunction} = config;
+			const cache = this.getFull(key);
+			if (cache.reload < now) {
+				queryFunction()
+					.then(x => x === null || x === undefined ? this.del(key) : this.setReadThrough(key, x, reload, ttl))
+			}
+		}
+	}
+	
+	intervalFunction() {
+		this.runBackgroundUpdates();
+		this.clearTtl();
+	}
+	
+	/**
 	 * set timer, may be used to reset the timer
 	 * */
 	setTimer() {
@@ -49,7 +76,6 @@ class Fastcache {
 	
 	clearEmptyDatabases() {
 		const dbs = Object.keys(this.databases);
-		
 	}
 	
 	/**
@@ -64,6 +90,13 @@ class Fastcache {
 			const key = this.cache[cachedKeys[i]];
 			if (this.cache[key].ttl < now) this.del(key);
 		}
+	}
+	
+	/**
+	 * Remove background updates
+	 * */
+	clearUpdates() {
+		this.backgroundUpdate = [];
 	}
 	
 	/**
@@ -250,6 +283,17 @@ class Fastcache {
 	}
 	
 	/**
+	 *
+	 * @param {string} key
+	 * @param {number} reload ttl where key gets reloaded
+	 * @param {number} ttl ttl where key gets deleted
+	 * @param {function} queryFunction function executed
+	 */
+	registerBackgroundUpdate(key, reload, ttl, queryFunction) {
+		this.backgroundUpdate.push({key, reload, ttl, queryFunction});
+	}
+	
+	/**
 	 * Uses read through cache
 	 * always returns the cached value and if ttl is exceeded reloads
 	 * its value in background, if no value exits it is deleted
@@ -257,8 +301,9 @@ class Fastcache {
 	 * @param {function} queryFunction async function which returns the value to cache null/undefined will empty the cache
 	 * @param {number} reload ttl where key gets reloaded
 	 * @param {number} ttl ttl where key gets deleted
+	 * @param {boolean} registerBackgroundUpdates add key to list of periodically updated backgroundupdates
 	 * */
-	async getReadThrough(key, queryFunction=async () => null, reload=20, ttl=40) {
+	async getReadThrough(key, queryFunction=async () => null, reload=20, ttl=40, registerBackgroundUpdates=false) {
 		const cache = this.getFull(key);
 		const now = performance.now();
 		
@@ -271,6 +316,9 @@ class Fastcache {
 			}
 			value = cache.value;
 		} else {
+			if (registerBackgroundUpdates) {
+				this.registerBackgroundUpdate(key, reload, queryFunction);
+			}
 			// initialize cache async if value exists
 			value = await queryFunction();
 			if (value) this.setReadThrough(key, value, reload, ttl)
