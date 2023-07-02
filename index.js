@@ -71,7 +71,7 @@ class Fastcache {
 	setTimer() {
 		if (this.timer) clearInterval(this.timer);
 		const seconds = this.getCheckTime();
-		this.timer = setInterval(() => this.clearTtl(), seconds * 1000);
+		this.timer = setInterval(() => this.intervalFunction(), seconds * 1000);
 	}
 	
 	clearEmptyDatabases() {
